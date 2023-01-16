@@ -14,31 +14,36 @@ class Battery():
     def getData(self):
         """Fetch data from system_profiler"""
         powerdata = subprocess.run(["system_profiler", "SPPowerDataType", "-json"], stdout=subprocess.PIPE)
-        return json.loads(powerdata.stdout)['SPPowerDataType']
+        return json.loads(powerdata.stdout)["SPPowerDataType"]
 
     def returnData(self):
         """Return a list of key-value pairs to iterate over"""
         data_list = []
         spbattery_information = self.getData()[0]
 
-        for key in spbattery_information['sppower_battery_health_info']:
+        for key, val in spbattery_information["sppower_battery_health_info"].items():
             # Really hackish way of skipping past sppower_battery_health, because I have no idea
             # how many states there are and how to convert them
             if key == "sppower_battery_health":
-                pass
-            else:
-                data_list.append({key: spbattery_information['sppower_battery_health_info'][key]})
+                continue
 
-        for key in spbattery_information['sppower_battery_charge_info']:
+            # Maximum capacity has a % suffix that Prometheus doesn't like
+            if key == "sppower_battery_health_maximum_capacity":
+                if val.endswith("%"):
+                    val = val[:-1]
+            data_list.append({key: val})
+
+        for key, val in spbattery_information["sppower_battery_charge_info"].items():
             # We need to convert string bool to a numeric value for the two keys below
-            if key in ["sppower_battery_is_charging", "sppower_battery_fully_charged"]:
-                str2bool = spbattery_information['sppower_battery_charge_info'][key]
-                spbattery_information['sppower_battery_charge_info'][key] = util.strtobool(str2bool)
+            if key in ["sppower_battery_is_charging", "sppower_battery_fully_charged", "sppower_battery_at_warn_level"]:
+                val = util.strtobool(val)
+            data_list.append({key: val})
 
-            data_list.append({key: spbattery_information['sppower_battery_charge_info'][key]})
+        if "sppower_current_amperage" in spbattery_information:
+            data_list.append({"sppower_current_amperage": spbattery_information["sppower_current_amperage"]})
+        if "sppower_current_voltage" in spbattery_information:
+            data_list.append({"sppower_current_voltage": spbattery_information["sppower_current_voltage"]})
 
-        data_list.append({'sppower_current_amperage': spbattery_information['sppower_current_amperage']})
-        data_list.append({'sppower_current_voltage': spbattery_information['sppower_current_voltage']})
         return data_list
 
 
@@ -52,12 +57,12 @@ class CustomCollector(object):
 
         for item in sppower:
             for metric_name, metric_value in item.items():
-                g = GaugeMetricFamily(metric_name, '')
+                g = GaugeMetricFamily(metric_name, "")
                 g.add_metric([], metric_value)
                 yield g
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     start_http_server(8333)
     REGISTRY.register(CustomCollector())
     while True:
